@@ -105,4 +105,5 @@ public class JwtDecoderConfiguration {
                     : OAuth2TokenValidatorResult.failure(error);
         }
     }
+
 }

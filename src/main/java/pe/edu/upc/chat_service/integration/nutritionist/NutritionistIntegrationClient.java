@@ -29,5 +29,8 @@ public interface NutritionistIntegrationClient {
      */
     @GetMapping("/nutritionist/{id}")
     List<NutritionistPatientResource> getPatientsOfNutritionist(@PathVariable("id") Integer nutritionistId);
+
+    @GetMapping("/chat-contacts/{userId}")
+    List<ChatContactResource> getChatContacts(@PathVariable("userId") Long userId);
 }
 

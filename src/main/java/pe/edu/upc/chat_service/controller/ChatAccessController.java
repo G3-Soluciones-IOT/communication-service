@@ -2,72 +2,64 @@ package pe.edu.upc.chat_service.controller;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.security.core.Authentication;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+import pe.edu.upc.chat_service.chat.ChatContactResponse;
+import pe.edu.upc.chat_service.chat.ChatMessageResource;
+import pe.edu.upc.chat_service.chat.ChatMessageService;
+import pe.edu.upc.chat_service.security.CurrentUserService;
 import pe.edu.upc.chat_service.service.ChatAccessValidationService;
+import pe.edu.upc.chat_service.service.ChatContactEnrichmentService;
 
+import java.time.Instant;
 import java.util.List;
-import java.util.Map;
 
-/**
- * REST Controller for chat access and validation endpoints.
- */
 @RestController
 @RequestMapping("/api/v1/chat")
-@Tag(name = "Chat Access", description = "Chat access validation and contact management")
+@Tag(name = "Chat", description = "Patient and nutritionist communication endpoints")
 public class ChatAccessController {
 
     private final ChatAccessValidationService chatAccessValidationService;
+    private final ChatContactEnrichmentService chatContactEnrichmentService;
+    private final ChatMessageService chatMessageService;
+    private final CurrentUserService currentUserService;
 
-    public ChatAccessController(ChatAccessValidationService chatAccessValidationService) {
+    public ChatAccessController(
+            ChatAccessValidationService chatAccessValidationService,
+            ChatContactEnrichmentService chatContactEnrichmentService,
+            ChatMessageService chatMessageService,
+            CurrentUserService currentUserService) {
         this.chatAccessValidationService = chatAccessValidationService;
+        this.chatContactEnrichmentService = chatContactEnrichmentService;
+        this.chatMessageService = chatMessageService;
+        this.currentUserService = currentUserService;
     }
 
-    /**
-     * Get all chat-enabled contacts for a user.
-     * Returns users that have an accepted nutritionist-patient relationship.
-     */
-    @Operation(
-            summary = "Get chat-enabled contacts",
-            description = "Returns all users that the specified user can chat with (accepted nutritionist-patient relationships)"
-    )
-    @GetMapping("/contacts/{userId}")
-    public ResponseEntity<List<Long>> getChatContacts(@PathVariable Long userId) {
-        if (!chatAccessValidationService.userExists(userId)) {
-            return ResponseEntity.notFound().build();
-        }
-
-        List<Long> contacts = chatAccessValidationService.getChatEnabledContacts(userId);
-        return ResponseEntity.ok(contacts);
+    @Operation(summary = "Get current user's chat contacts")
+    @GetMapping("/me/contacts")
+    public ResponseEntity<List<ChatContactResponse>> getMyChatContacts(Authentication authentication) {
+        var currentUserId = currentUserService.currentUserId(authentication);
+        var contacts = chatAccessValidationService.getChatEnabledContacts(currentUserId);
+        return ResponseEntity.ok(chatContactEnrichmentService.enrich(contacts));
     }
 
-    /**
-     * Validate if two users can chat with each other.
-     */
-    @Operation(
-            summary = "Validate chat access",
-            description = "Validates if two users have permission to chat with each other"
-    )
-    @GetMapping("/validate")
-    public ResponseEntity<Map<String, Boolean>> validateChatAccess(
-            @RequestParam Long userId1,
-            @RequestParam Long userId2) {
-
-        boolean canChat = chatAccessValidationService.canUsersChat(userId1, userId2);
-        return ResponseEntity.ok(Map.of("canChat", canChat));
-    }
-
-    /**
-     * Check if a user exists in the system.
-     */
-    @Operation(
-            summary = "Check user existence",
-            description = "Validates if a user exists in IAM service"
-    )
-    @GetMapping("/users/{userId}/exists")
-    public ResponseEntity<Map<String, Boolean>> checkUserExists(@PathVariable Long userId) {
-        boolean exists = chatAccessValidationService.userExists(userId);
-        return ResponseEntity.ok(Map.of("exists", exists));
+    @Operation(summary = "Get messages for a conversation with an accepted contact")
+    @GetMapping("/conversations/{contactUserId}/messages")
+    public ResponseEntity<List<ChatMessageResource>> getConversationMessages(
+            Authentication authentication,
+            @PathVariable Long contactUserId,
+            @RequestParam(defaultValue = "50") int limit,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant before) {
+        var currentUserId = currentUserService.currentUserId(authentication);
+        var messages = chatMessageService.findChatMessages(currentUserId, contactUserId, limit, before).stream()
+                .map(ChatMessageResource::from)
+                .toList();
+        return ResponseEntity.ok(messages);
     }
 }
-

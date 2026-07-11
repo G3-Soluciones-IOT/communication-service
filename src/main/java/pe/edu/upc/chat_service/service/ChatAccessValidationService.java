@@ -4,8 +4,8 @@ import feign.FeignException;
 import org.springframework.stereotype.Service;
 import pe.edu.upc.chat_service.integration.iam.IamIntegrationClient;
 import pe.edu.upc.chat_service.integration.iam.UserResource;
+import pe.edu.upc.chat_service.integration.nutritionist.ChatContactResource;
 import pe.edu.upc.chat_service.integration.nutritionist.NutritionistIntegrationClient;
-import pe.edu.upc.chat_service.integration.nutritionist.NutritionistPatientResource;
 
 import java.util.List;
 
@@ -37,7 +37,6 @@ public class ChatAccessValidationService {
      */
     public boolean canUsersChat(Long userId1, Long userId2) {
         try {
-            // Verify both users exist in IAM
             UserResource user1 = iamClient.getUserById(userId1);
             UserResource user2 = iamClient.getUserById(userId2);
 
@@ -45,46 +44,10 @@ public class ChatAccessValidationService {
                 return false;
             }
 
-            // Check if they have an accepted relationship
-            return hasAcceptedRelationship(userId1, userId2);
+            return getChatEnabledContacts(userId1).stream()
+                    .anyMatch(contact -> userId2.equals(contact.contactUserId()));
 
-        } catch (FeignException.NotFound e) {
-            return false;
-        } catch (Exception e) {
-            System.err.println("Error validating chat access: " + e.getMessage());
-            return false;
-        }
-    }
-
-    /**
-     * Checks if there's an accepted nutritionist-patient relationship between users.
-     */
-    private boolean hasAcceptedRelationship(Long userId1, Long userId2) {
-        try {
-            // Check if user1 is a patient of user2 (user2 is nutritionist)
-            List<NutritionistPatientResource> relationshipsAsPatient =
-                nutritionistClient.getNutritionistsOfPatient(userId1);
-
-            boolean foundAsPatient = relationshipsAsPatient.stream()
-                    .anyMatch(rel -> rel.patientUserId().equals(userId1)
-                            && rel.accepted()
-                            && rel.nutritionistId().longValue() == userId2);
-
-            if (foundAsPatient) {
-                return true;
-            }
-
-            // Check if user1 is a nutritionist of user2 (user2 is patient)
-            List<NutritionistPatientResource> relationshipsAsNutritionist =
-                nutritionistClient.getNutritionistsOfPatient(userId2);
-
-            return relationshipsAsNutritionist.stream()
-                    .anyMatch(rel -> rel.patientUserId().equals(userId2)
-                            && rel.accepted()
-                            && rel.nutritionistId().longValue() == userId1);
-
-        } catch (Exception e) {
-            System.err.println("Error checking relationship: " + e.getMessage());
+        } catch (FeignException.NotFound exception) {
             return false;
         }
     }
@@ -93,28 +56,14 @@ public class ChatAccessValidationService {
      * Gets all chat-enabled contacts for a user (their nutritionists or patients).
      *
      * @param userId the user ID
-     * @return list of user IDs that can chat with this user
+     * @return list of normalized contacts that can chat with this user
      */
-    public List<Long> getChatEnabledContacts(Long userId) {
+    public List<ChatContactResource> getChatEnabledContacts(Long userId) {
         try {
-            List<NutritionistPatientResource> relationships =
-                nutritionistClient.getNutritionistsOfPatient(userId);
-
-            return relationships.stream()
-                    .filter(NutritionistPatientResource::accepted)
-                    .map(rel -> {
-                        // If this user is the patient, return the nutritionist ID
-                        if (rel.patientUserId().equals(userId)) {
-                            return rel.nutritionistId().longValue();
-                        }
-                        // Otherwise, return the patient ID
-                        return rel.patientUserId();
-                    })
-                    .distinct()
+            return nutritionistClient.getChatContacts(userId).stream()
+                    .filter(contact -> Boolean.TRUE.equals(contact.accepted()))
                     .toList();
-
-        } catch (Exception e) {
-            System.err.println("Error getting chat contacts: " + e.getMessage());
+        } catch (FeignException.NotFound exception) {
             return List.of();
         }
     }

@@ -3,6 +3,8 @@ package pe.edu.upc.chat_service.chatroom;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
+import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 
 @Service
@@ -11,44 +13,47 @@ public class ChatRoomService {
 
     private final ChatRoomRepository chatRoomRepository;
 
-    public Optional<String> getChatRoomId(
-            String senderId,
-            String recipientId,
+    public Optional<String> getConversationId(
+            Long senderUserId,
+            Long recipientUserId,
             boolean createNewRoomIfNotExists
     ) {
-        return chatRoomRepository
-                .findBySenderIdAndRecipientId(senderId, recipientId)
-                .map(ChatRoom::getChatId)
-                .or(() -> {
-                    if(createNewRoomIfNotExists) {
-                        var chatId = createChatId(senderId, recipientId);
-                        return Optional.of(chatId);
-                    }
+        var conversationId = conversationId(senderUserId, recipientUserId);
 
-                    return  Optional.empty();
-                });
+        return chatRoomRepository.findByConversationId(conversationId)
+                .map(ChatRoom::getConversationId)
+                .or(() -> createNewRoomIfNotExists
+                        ? Optional.of(createChatRoom(conversationId, senderUserId, recipientUserId).getConversationId())
+                        : Optional.empty());
     }
 
-    private String createChatId(String senderId, String recipientId) {
-        var chatId = String.format("%s_%s", senderId, recipientId);
+    public void touch(String conversationId, Instant lastMessageAt) {
+        chatRoomRepository.findByConversationId(conversationId).ifPresent(chatRoom -> {
+            chatRoom.setLastMessageAt(lastMessageAt);
+            chatRoomRepository.save(chatRoom);
+        });
+    }
 
-        ChatRoom senderRecipient = ChatRoom
+    private ChatRoom createChatRoom(String conversationId, Long senderUserId, Long recipientUserId) {
+        var orderedParticipants = orderedParticipants(senderUserId, recipientUserId);
+        var chatRoom = ChatRoom
                 .builder()
-                .chatId(chatId)
-                .senderId(senderId)
-                .recipientId(recipientId)
+                .conversationId(conversationId)
+                .participantUserIds(orderedParticipants)
+                .lastMessageAt(Instant.now())
                 .build();
 
-        ChatRoom recipientSender = ChatRoom
-                .builder()
-                .chatId(chatId)
-                .senderId(recipientId)
-                .recipientId(senderId)
-                .build();
+        return chatRoomRepository.save(chatRoom);
+    }
 
-        chatRoomRepository.save(senderRecipient);
-        chatRoomRepository.save(recipientSender);
+    private String conversationId(Long senderUserId, Long recipientUserId) {
+        var participants = orderedParticipants(senderUserId, recipientUserId);
+        return participants.get(0) + "_" + participants.get(1);
+    }
 
-        return chatId;
+    private List<Long> orderedParticipants(Long senderUserId, Long recipientUserId) {
+        return senderUserId <= recipientUserId
+                ? List.of(senderUserId, recipientUserId)
+                : List.of(recipientUserId, senderUserId);
     }
 }
